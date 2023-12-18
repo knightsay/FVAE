@@ -3,6 +3,7 @@ import numpy as np
 import random
 import os
 from dataclasses import dataclass, field
+from tqdm import tqdm
 from Layers import *
 
 def set_seed(seed):
@@ -70,7 +71,7 @@ def load_model(args):
 @torch.no_grad()
 def generate_prediction_scores(model, test_dataloader, test_dataset, args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
+    print(f'Running prediction on {device}')
     model.to(device)
     
     model.eval()
@@ -82,15 +83,23 @@ def generate_prediction_scores(model, test_dataloader, test_dataset, args):
             char = char.to(device)
             if char.shape[1] != args.seq_length:
                 continue
-            predictions = model.prediction(char.float())
+                
+            predictions = model.prediction(char.permute(0, 2, 1).float())
             df = pd.DataFrame(predictions.cpu().numpy(), columns=['score'])
+
+            if not len(df.dropna()):
+                raise RuntimeError('Predictions are all NaNs')
+                
             try:
                 index = test_dataset.index[(args.seq_length +i -1) * args.batch_size : (args.seq_length+i) * args.batch_size]
+                index.name = ('datetime', 'instrument')
                 df.index = index
                 df.drop('empty', level='instrument',inplace=True)
                 ls.append(df)
-            except:
+            except Exception as e:
+                print(f'Test dataloader {i}-th iteration failed due to {e}')
                 err.append(df)
+                
             pbar.update(1)
     return pd.concat(ls), err
 

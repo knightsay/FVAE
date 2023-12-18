@@ -18,6 +18,14 @@ import wandb
 
 parser = argparse.ArgumentParser(description='Train a FactorVAE model on stock data')
 
+parser.add_argument('--data_dir', type=str, default='./data', help='directory to save model')
+parser.add_argument('--start_time', type=str, default='2010-12-01', help='start time')
+parser.add_argument('--end_time', type=str, default='2020-12-31', help='end time')
+parser.add_argument('--fit_end_time', type=str, default='2017-12-31', help='fit end time')
+parser.add_argument('--val_start_time', type=str, default='2018-01-01', help='val start time')
+parser.add_argument('--val_end_time', type=str, default='2018-12-31', help='val end time')
+parser.add_argument('--select_feature', action='store_true', help='whether to select feature')
+parser.add_argument('--use_qlib', action='store_true', help='whether to use qlib data')
 parser.add_argument('--num_epochs', type=int, default=50, help='number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.0005, help='learning rate')
 parser.add_argument('--batch_size', type=int, default=300, help='batch size')
@@ -30,9 +38,20 @@ parser.add_argument('--run_name', type=str, help='name of the run')
 parser.add_argument('--save_dir', type=str, default='./best_models', help='directory to save model')
 parser.add_argument('--wandb', action='store_true', help='whether to use wandb')
 parser.add_argument('--normalize', action='store_true', help='whether to normalize the data')
-args = parser.parse_args()
+args = parser.parse_args()    
 
-data_args = DataArgument(use_qlib=False, normalize=True, select_feature=False)
+data_args = DataArgument(
+    save_dir=args.data_dir,
+    start_time=args.start_time, 
+    end_time=args.end_time, 
+    fit_end_time=args.fit_end_time,
+    val_start_time=args.val_start_time,
+    val_end_time=args.val_end_time,
+    seq_len=args.seq_len, 
+    use_qlib=args.use_qlib, 
+    normalize=args.normalize, 
+    select_feature=args.select_feature
+)
 
 assert args.seq_len == data_args.seq_len, "seq_len in args and data_args must be the same"
 assert args.normalize == data_args.normalize, "normalize in args and data_args must be the same"
@@ -78,16 +97,16 @@ def main(args, data_args):
     valid_ds = StockDataset(valid_df, args.batch_size, args.seq_len)
     #test_ds = StockDataset(test_df, args.batch_size, args.seq_len)
     
-    train_dataloader = DataLoader(train_ds, batch_size=300, shuffle=False, num_workers=4)
-    valid_dataloader = DataLoader(valid_ds, batch_size=300, shuffle=False, num_workers=4)
-    #test_dataloader = DataLoader(test_ds, batch_size=300, shuffle=False, num_workers=4)
+    train_dataloader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    valid_dataloader = DataLoader(valid_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    #test_dataloader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args.device = device
         
     factorVAE.to(device)
-    best_val_loss = 10000.0
-    optimizer = torch.optim.Adam(factorVAE.parameters(), lr=args.lr)
+    best_val_loss = np.inf
+    optimizer = torch.optim.AdamW(factorVAE.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=args.lr, steps_per_epoch=len(train_dataloader), epochs=args.num_epochs)
     
     # Start Trainig
@@ -97,12 +116,13 @@ def main(args, data_args):
         test_loss = np.NaN #test(factorVAE, test_dataloader, args)
         scheduler.step()
         print(f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}") #Test Loss: {test_loss:.4f},
+        
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            #? save model in save_dir
-            
-            #? torch.save
-            save_root = os.path.join(args.save_dir, f'{args.run_name}_{args.num_factor}_norm_{data_args.normalize}_char_{data_args.select_feature}.pt')
+            save_root = os.path.join(
+                args.save_dir, 
+                f'{args.run_name}_{args.num_factor}_norm_{data_args.normalize}_char_{data_args.select_feature}.pt'
+            )
             torch.save(factorVAE.state_dict(), save_root)
             
         if args.wandb:

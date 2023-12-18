@@ -3,6 +3,7 @@ import numpy as np
 import argparse
 import qlib
 import pandas as pd
+from datetime import timedelta
 from qlib.constant import REG_CN
 from qlib.contrib.data.handler import Alpha158
 from qlib.utils import exists_qlib_data, init_instance_by_config
@@ -32,7 +33,6 @@ parser.add_argument('--normalize', action='store_true', help='whether to normali
 parser.add_argument('--select_feature', action='store_true', help='whether to select feature')
 parser.add_argument('--use_qlib', action='store_true', help='whether to use qlib data')
 args = parser.parse_args()
-
 
 def main(args):
     provider_uri = "~/.qlib/qlib_data/cn_data"  # target_dir
@@ -67,6 +67,7 @@ def main(args):
         }
     
     dataset = Alpha158(**data_handler_config)
+    test_start_time = (pd.to_datetime(args.val_end_time) + timedelta(days=1)).strftime('%Y-%m-%d')
     
     if not args.use_qlib:
         
@@ -75,23 +76,20 @@ def main(args):
         else:
             dataframe = dataset.fetch(col_set=["feature","label"])
         
-
         dataframe.columns = dataframe.columns.droplevel(0)
         
         # ! 자동 조정이 생각보다 힘든 부분. 실제로 데이터를 보고 조정해야함.
-        train = dataframe.loc[pd.IndexSlice[ : f'{args.fit_end_time}', :], :]
-        
-        val_start_time = pd.to_datetime(args.val_start_time) - pd.DateOffset(days=30)
-        valid = dataframe.loc[pd.IndexSlice[val_start_time: f'{args.val_end_time}', :], :]
-        
-        test_start_time = pd.to_datetime(args.val_end_time) - pd.DateOffset(days=30)
+        train = dataframe.loc[pd.IndexSlice[ : f'{args.fit_end_time}', :], :]        
+        valid = dataframe.loc[pd.IndexSlice[f'{args.val_start_time}': f'{args.val_end_time}', :], :]
         test = dataframe.loc[pd.IndexSlice[test_start_time:, :], :]
     
     else:
         from qlib.data.dataset import DatasetH, TSDatasetH
-        r_data_h = TSDatasetH(handler=dataset, segments={"train": ("2010-01-01", "2017-12-31"), \
-                                                        "valid": ("2018-01-01", "2018-12-31"), \
-                                                        "test": ("2019-01-01", "2020-10-01")}, step_len=args.seq_len)
+        r_data_h = TSDatasetH(handler=dataset, segments={
+            "train": (args.start_time, args.fit_end_time), 
+            "valid": (args.val_start_time, args.val_end_time), 
+            "test": (test_start_time, args.end_time)
+        }, step_len=args.seq_len)
         
         train = r_data_h.prepare("train", col_set=["feature", "label"], data_key=DatasetH.DK_L)
         valid = r_data_h.prepare("valid", col_set=["feature", "label"], data_key=DatasetH.DK_L)
